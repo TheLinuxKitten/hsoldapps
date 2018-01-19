@@ -1,0 +1,46 @@
+name:                hsoldapps
+version:             0.1.0.0
+synopsis:            Solidity DApps
+homepage:            none
+license:             BSD3
+license-file:        LICENSE
+author:              The Linux Kitten
+maintainer:          thelinuxkitten@thelinuxkitten.org
+category:            Network
+build-type:          Simple
+cabal-version:       >=1.10
+
+library
+  exposed-modules:     Ethereum.Solidity.Coin
+                     , Ethereum.Solidity.Meta
+                     , Ethereum.Solidity.New1
+                     , Ethereum.Solidity.Overload
+                     , Ethereum.Solidity.OwnedToken
+                     , Ethereum.Solidity.Sharer
+                     , Ethereum.Solidity.Test1
+                     , Ethereum.Solidity.Topics
+                     , Ethereum.Solidity.Types
+  build-depends:       base >=4 && <5
+                     , bytestring
+                     , directory
+                     , hethdapp
+                     , hethrpc
+                     , template-haskell
+                     , text
+  ghc-options:       -ddump-splices
+  hs-source-dirs:      src
+  default-language:    Haskell2010
+
+executable hsoldapp1
+  main-is:             hsoldapp1.hs
+  build-depends:       base >=4 && <5
+                     , bytestring
+                     , hsoldapps
+                     , hethdapp
+                     , hethrpc
+                     , split
+                     , text
+  ghc-options:       -threaded -ddump-splices
+  hs-source-dirs:    demo
+  default-language:  Haskell2010
+
