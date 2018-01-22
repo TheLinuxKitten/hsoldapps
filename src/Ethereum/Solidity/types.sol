@@ -79,7 +79,16 @@ contract Types {
   function retBytes16(bytes16 a) public pure returns (bytes16) { return a; }
   function retBytes32(bytes32 a) public pure returns (bytes32) { return a; }
   function retAddress(address a) public pure returns (address) { return a; }
+  function retTryUint8(uint a) public pure returns (uint8) { return uint8(a); }
+  function retTryInt8(int a) public pure returns (int8) { return int8(a); }
   function retUint(uint a) public pure returns (uint) { return a; }
+  function retUint8(uint8 a) public pure returns (uint8) { return a; }
+  function retUint16(uint16 a) public pure returns (uint16) { return a; }
+  function retUint48(uint48 a) public pure returns (uint48) { return a; }
+  function retInt(int a) public pure returns (int) { return a; }
+  function retInt8(int8 a) public pure returns (int8) { return a; }
+  function retInt16(int16 a) public pure returns (int16) { return a; }
+  function retInt48(int48 a) public pure returns (int48) { return a; }
   //function retFixArrString(string[2] a) public returns (string[2]) { return a; }
   //function retFixArrString() public returns (string[2]) { return ["hola","mundo"]; }
   //function retFixArrBytes(bytes[2] a) public returns (bytes[2]) { return a; }

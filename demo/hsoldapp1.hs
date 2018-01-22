@@ -38,15 +38,17 @@ import Network.Web3.Extra
 import Network.Web3.Types
 import System.Environment (getArgs, getEnv)
 
-getOps :: FilePath -> IO (Bool,Bool,Bool,Bool,String,[(Text,HexEthAddr)])
-getOps h = pAs (False,False,False,False,h++"/.ethereum/geth.ipc",[]) <$> getArgs
+getOps :: FilePath -> IO (Bool,Bool,Bool,Int,Int,Bool,String,[(Text,HexEthAddr)])
+getOps h = pAs (False,False,False,5,15,False,h++"/.ethereum/geth.ipc",[]) <$> getArgs
   where
-    pAs (th,dok,log,useHttp,uri,ha) ("--ipc":ipc:as) = pAs (th,dok,log,False,ipc,ha) as
-    pAs (th,dok,log,useHttp,uri,ha) ("--http":url:as) = pAs (th,dok,log,True,url,ha) as
-    pAs (th,dok,log,useHttp,uri,ha) ("--log":as) = pAs (th,dok,True,useHttp,uri,ha) as
-    pAs (th,dok,log,useHttp,uri,ha) ("--doOk":as) = pAs (th,True,log,useHttp,uri,ha) as
-    pAs (th,dok,log,useHttp,uri,ha) ("--threaded":as) = pAs (True,dok,log,useHttp,uri,ha) as
-    pAs (th,dok,log,useHttp,uri,ha) ("--contractAddress":caddr:as) = pAs (th,dok,log,useHttp,uri,cAddr caddr : ha) as
+    pAs (th,dok,log,td,fd,useHttp,uri,ha) ("--ipc":ipc:as) = pAs (th,dok,log,td,fd,False,ipc,ha) as
+    pAs (th,dok,log,td,fd,useHttp,uri,ha) ("--http":url:as) = pAs (th,dok,log,td,fd,True,url,ha) as
+    pAs (th,dok,log,td,fd,useHttp,uri,ha) ("--threadDelay":d:as) = pAs (th,dok,log,read d,fd,useHttp,uri,ha) as
+    pAs (th,dok,log,td,fd,useHttp,uri,ha) ("--filterDelay":d:as) = pAs (th,dok,log,td,read d,useHttp,uri,ha) as
+    pAs (th,dok,log,td,fd,useHttp,uri,ha) ("--log":as) = pAs (th,dok,True,td,fd,useHttp,uri,ha) as
+    pAs (th,dok,log,td,fd,useHttp,uri,ha) ("--doOk":as) = pAs (th,True,log,td,fd,useHttp,uri,ha) as
+    pAs (th,dok,log,td,fd,useHttp,uri,ha) ("--threaded":as) = pAs (True,dok,log,td,fd,useHttp,uri,ha) as
+    pAs (th,dok,log,td,fd,useHttp,uri,ha) ("--contractAddress":caddr:as) = pAs (th,dok,log,td,fd,useHttp,uri,cAddr caddr : ha) as
     pAs _ ("--help":as) = msgUso
     pAs _ ("-h":as) = msgUso
     pAs ops [] = ops
@@ -54,6 +56,8 @@ getOps h = pAs (False,False,False,False,h++"/.ethereum/geth.ipc",[]) <$> getArgs
     cAddr caddr = let cs = splitOn ":" caddr in (T.pack $ head cs, HexEthAddr $ T.pack $ last cs)
     msgUso = error $ "Uso:\n"
                   ++ "    [--ipc file|--http url]\n"
+                  ++ "    [--threadDelay n]\n"
+                  ++ "    [--filterDelay n]\n"
                   ++ "    [--log]\n"
                   ++ "    [--doOk]\n"
                   ++ "    [--threaded]\n"
@@ -69,14 +73,14 @@ getCAddr n caddrs = snd <$> listToMaybe (filter ((n==) . fst) caddrs)
 main :: IO ()
 main = do
   h <- getEnv "HOME"
-  (threaded,doOk,doLog,useHttp,uri,caddrs) <- getOps h
+  (threaded,doOk,doLog,tD,fD,useHttp,uri,caddrs) <- getOps h
   let ll = if doLog then LevelDebug else LevelInfo
   resp <- runStdoutLoggingT $ filterLoggerLogLevel ll $ if useHttp
-              then runWeb3HttpT 10 15 uri (ethAction threaded doOk caddrs)
-              else runWeb3IpcT 10 15 uri (ethAction threaded doOk caddrs)
+              then runWeb3HttpT tD fD uri (ethAction threaded doOk caddrs)
+              else runWeb3IpcT tD fD uri (ethAction threaded doOk caddrs)
   print resp
   where
-    ethAction threaded doOk caddrs = do
+    ethAction threaded doOk caddrs = guardMining $ do
       let tests = [ ("Coin", test_coin)
                   , ("Topics", test_topics)
                   , ("Test1", test_test1)
@@ -101,7 +105,7 @@ main = do
         showWeb3Session "Session: terminando"
         mapM_ (\((nom,_),addr) -> logConAddr nom addr)
               (nubBy (\d1 d2 -> (snd d1) == (snd d2)) $ zip tests addrs)
-      return ()
+      return $ Right ()
     runTest doOk caddrs (nom,f) = do
       showWeb3Session $ "Session: lanzo " <> nom
       f doOk $ getCAddr nom caddrs
@@ -140,28 +144,33 @@ logDebugFilterLogs n dl fls =
 
 conAddr :: (JsonRpcConn c, MonadLoggerIO m, MonadBaseControl IO m, Show e)
         => (HexEthAddr -> Web3T c m ())
+        -> Maybe (IO (Either Text (HexHash256, [(FilePath, HexHash256)])))
         -> Maybe (RpcEthLog -> Either Text e)
         -> (HexEthAddr, Maybe HexEthAddr, Maybe Integer, Maybe HexData)
         -> Maybe HexEthAddr
         -> Web3T c m HexEthAddr
-conAddr conG mdl (f,mt,mv,md) maddr = case maddr of
+conAddr conG mConU mdl (f,mt,mv,md) maddr = case maddr of
   Just addr -> conG addr >> return addr
   Nothing -> do
     txr <- web3_estimateAndSendTx f mt mv md >>= web3FromE
     case mdl of
       Nothing -> return ()
       Just dl -> logDebugTxrs dl [Right txr]
+    case mConU of
+      Nothing -> return ()
+      Just conU -> (liftIO conU) >>= logDebugN . T.pack . show
     return $ fromJust $ txrContractAddress txr
 
 newFilter :: (JsonRpcConn c, MonadLoggerIO m, MonadBaseControl IO m)
           => HexEthAddr -> Int64 -> [RpcEthFilterTopic] -> Web3T c m FilterId
-newFilter cAddr bn =
-  web3FilterNew . RpcEthFilter (Just $ RPBNum bn) (Just RPBLatest) (Just [cAddr])
-                . Just
+newFilter cAddr bn ftps = do
+  logDebugN $ T.pack $ show ftps
+  web3FilterNew $ RpcEthFilter (Just $ RPBNum bn) (Just RPBLatest)
+                               (Just [cAddr]) (Just ftps)
 
 test_new1 doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts
-  cAddr <- conAddr c_guard null_decode_log (c_new_sendtx addr2) maddr
+  cAddr <- conAddr c_guard (Just c_swarm_upload) null_decode_log (c_new_sendtx addr2) maddr
   etxrs1 <- web3_estimateAndSendTxs
             [ c_created_sendtx addr2 cAddr 50000000
             , c_created_sendtx addr2 cAddr 50000000
@@ -172,7 +181,7 @@ test_new1 doOk maddr = do
 
 test_coin doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts
-  cAddr <- conAddr coin_guard (Just coin_decode_log) (coin_new_sendtx addr2) maddr
+  cAddr <- conAddr coin_guard (Just coin_swarm_upload) (Just coin_decode_log) (coin_new_sendtx addr2) maddr
   bn <- eth_blockNumber
   fi1 <- newFilter cAddr bn $ coin_to_filter_topics Coin_Sent_Filter
   etxrs1 <- web3_estimateAndSendTxs
@@ -223,7 +232,7 @@ test_coin doOk maddr = do
 
 test_topics doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts
-  cAddr <- conAddr topics_guard (Just topics_decode_log) (topics_new_sendtx addr1) maddr
+  cAddr <- conAddr topics_guard (Just topics_swarm_upload) (Just topics_decode_log) (topics_new_sendtx addr1) maddr
   bn <- eth_blockNumber
   fi1 <- newFilter cAddr bn $ topics_to_filter_topics
           $ Topics_EvString_Filter (Just "string")
@@ -280,7 +289,7 @@ test_topics doOk maddr = do
 
 test_test1 doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts
-  cAddr <- conAddr test1_guard (Just test1_decode_log) (test1_new_sendtx addr3 "test1") maddr
+  cAddr <- conAddr test1_guard (Just test1_swarm_upload) (Just test1_decode_log) (test1_new_sendtx addr3 "test1") maddr
   bn <- eth_blockNumber
   fi0 <- newFilter cAddr bn $ test1_to_filter_topics $ Test1_SendTokens_Filter (Nothing, Just addr1)
   fi1 <- web3FilterNew $ RpcEthFilter (Just $ RPBNum bn) (Just RPBLatest)
@@ -288,50 +297,55 @@ test_test1 doOk maddr = do
   fi2 <- newFilter cAddr bn [topicNull, topicAddr addr1]
   fi3 <- newFilter cAddr bn [topicNull, topicAddr addr1, topicNull]
   fi4 <- newFilter cAddr bn $ test1_to_filter_topics $ Test1_Nombre_Filter (Just "Contract actualizado: test1 iniciado.")
+  tkp <- test1_tokenprice_call addr3 cAddr
+  etxrs0 <- web3_estimateAndSendTxs
+            [ test1_cambiatokenprice_sendtx addr3 cAddr (tkp+10)
+            , test1_cambianombre_sendtx addr3 cAddr "test1 iniciado 1."
+            ]
   wf1 <- web3Fork $ do
     _ <- web3_estimateAndSendTxs
-          [ test1_buytokens_sendtx addr1 cAddr 50000
-          , test1_buytokens_sendtx addr2 cAddr 50000
-          , test1_buytokens_sendtx addr1 cAddr 50000
-          , test1_buytokens_sendtx addr2 cAddr 50000
+          [ test1_buytokens_sendtx addr1 cAddr 50000000
+          , test1_buytokens_sendtx addr2 cAddr 50000000
+          , test1_buytokens_sendtx addr1 cAddr 50000000
+          , test1_buytokens_sendtx addr2 cAddr 50000000
           ]
     return ()
   wf2 <- web3Fork $ do
     _ <- web3_estimateAndSendTxs
-          [ test1_buytokens_sendtx addr3 cAddr 50000
-          , test1_buytokens_sendtx addr3 cAddr 50000
-          , test1_buytokens_sendtx addr4 cAddr 50000
-          , test1_buytokens_sendtx addr4 cAddr 50000
+          [ test1_buytokens_sendtx addr3 cAddr 50000000
+          , test1_buytokens_sendtx addr3 cAddr 50000000
+          , test1_buytokens_sendtx addr4 cAddr 50000000
+          , test1_buytokens_sendtx addr4 cAddr 50000000
           ]
     return ()
   wf3 <- web3Fork $ do
     _ <- web3_estimateAndSendTxs
-          [ test1_buytokens_sendtx addr1 cAddr 50000
-          , test1_buytokens_sendtx addr2 cAddr 50000
-          , test1_buytokens_sendtx addr1 cAddr 50000
-          , test1_buytokens_sendtx addr2 cAddr 50000
+          [ test1_buytokens_sendtx addr1 cAddr 50000000
+          , test1_buytokens_sendtx addr2 cAddr 50000000
+          , test1_buytokens_sendtx addr1 cAddr 50000000
+          , test1_buytokens_sendtx addr2 cAddr 50000000
           ]
     return ()
   wf4 <- web3Fork $ do
     _ <- web3_estimateAndSendTxs
-          [ test1_buytokens_sendtx addr3 cAddr 50000
-          , test1_buytokens_sendtx addr3 cAddr 50000
-          , test1_buytokens_sendtx addr4 cAddr 50000
-          , test1_buytokens_sendtx addr4 cAddr 50000
+          [ test1_buytokens_sendtx addr3 cAddr 50000000
+          , test1_buytokens_sendtx addr3 cAddr 50000000
+          , test1_buytokens_sendtx addr4 cAddr 50000000
+          , test1_buytokens_sendtx addr4 cAddr 50000000
           ]
     return ()
   watxrs1 <- web3Async $ do
     etxrs1 <- web3_estimateAndSendTxs
-              [ test1_buytokens_sendtx addr1 cAddr 50000
-              , test1_buytokens_sendtx addr2 cAddr 50000
-              , test1_buytokens_sendtx addr1 cAddr 50000
-              , test1_buytokens_sendtx addr2 cAddr 50000
+              [ test1_buytokens_sendtx addr1 cAddr 50000000
+              , test1_buytokens_sendtx addr2 cAddr 50000000
+              , test1_buytokens_sendtx addr1 cAddr 50000000
+              , test1_buytokens_sendtx addr2 cAddr 50000000
               ]
     etxrs2 <- web3_estimateAndSendTxs
-              [ test1_buytokens_sendtx addr1 cAddr 50000
-              , test1_buytokens_sendtx addr1 cAddr 50000
-              , test1_buytokens_sendtx addr2 cAddr 50000
-              , test1_buytokens_sendtx addr1 cAddr 50000
+              [ test1_buytokens_sendtx addr1 cAddr 50000000
+              , test1_buytokens_sendtx addr1 cAddr 50000000
+              , test1_buytokens_sendtx addr2 cAddr 50000000
+              , test1_buytokens_sendtx addr1 cAddr 50000000
               , test1_sendtokens_sendtx addr2 cAddr (addr3,22)
               , test1_sendtokens_sendtx addr1 cAddr (addr3,11)
               , test1_sendtokens_sendtx addr1 cAddr (addr4,11)
@@ -340,16 +354,16 @@ test_test1 doOk maddr = do
     return $ etxrs1 ++ etxrs2
   watxrs2 <- web3Async $ do
     etxrs1 <- web3_estimateAndSendTxs
-              [ test1_buytokens_sendtx addr3 cAddr 50000
-              , test1_buytokens_sendtx addr3 cAddr 50000
-              , test1_buytokens_sendtx addr4 cAddr 50000
-              , test1_buytokens_sendtx addr4 cAddr 50000
+              [ test1_buytokens_sendtx addr3 cAddr 50000000
+              , test1_buytokens_sendtx addr3 cAddr 50000000
+              , test1_buytokens_sendtx addr4 cAddr 50000000
+              , test1_buytokens_sendtx addr4 cAddr 50000000
               ]
     etxrs2 <- web3_estimateAndSendTxs
-              [ test1_buytokens_sendtx addr4 cAddr 50000
-              , test1_buytokens_sendtx addr3 cAddr 50000
-              , test1_buytokens_sendtx addr4 cAddr 50000
-              , test1_buytokens_sendtx addr3 cAddr 50000
+              [ test1_buytokens_sendtx addr4 cAddr 50000000
+              , test1_buytokens_sendtx addr3 cAddr 50000000
+              , test1_buytokens_sendtx addr4 cAddr 50000000
+              , test1_buytokens_sendtx addr3 cAddr 50000000
               , test1_sendtokens_sendtx addr4 cAddr (addr2,22)
               , test1_sendtokens_sendtx addr3 cAddr (addr2,11)
               , test1_sendtokens_sendtx addr4 cAddr (addr2,11)
@@ -357,20 +371,21 @@ test_test1 doOk maddr = do
               ]
     return $ etxrs1 ++ etxrs2
   etxrs1 <- web3_estimateAndSendTxs
-            [ test1_buytokens_sendtx addr1 cAddr 50000
-            , test1_buytokens_sendtx addr2 cAddr 50000
-            , test1_buytokens_sendtx addr3 cAddr 50000
-            , test1_buytokens_sendtx addr4 cAddr 50000
+            [ test1_buytokens_sendtx addr1 cAddr 50000000
+            , test1_buytokens_sendtx addr2 cAddr 50000000
+            , test1_buytokens_sendtx addr3 cAddr 50000000
+            , test1_buytokens_sendtx addr4 cAddr 50000000
             ]
+  tkp <- test1_tokenprice_call addr3 cAddr
   etxrs2 <- web3_estimateAndSendTxs
-            [ test1_cambiatokenprice_sendtx addr3 cAddr 10
-            , test1_cambianombre_sendtx addr3 cAddr "test1 iniciado."
+            [ test1_cambiatokenprice_sendtx addr3 cAddr (tkp+10)
+            , test1_cambianombre_sendtx addr3 cAddr "test1 iniciado 2."
             ]
   etxrs3 <- web3_estimateAndSendTxs
-            [ test1_buytokens_sendtx addr1 cAddr 50000
-            , test1_buytokens_sendtx addr4 cAddr 50000
-            , test1_buytokens_sendtx addr2 cAddr 50000
-            , test1_buytokens_sendtx addr3 cAddr 50000
+            [ test1_buytokens_sendtx addr1 cAddr 50000000
+            , test1_buytokens_sendtx addr4 cAddr 50000000
+            , test1_buytokens_sendtx addr2 cAddr 50000000
+            , test1_buytokens_sendtx addr3 cAddr 50000000
             , test1_sendtokens_sendtx addr2 cAddr (addr1,22)
             , test1_sendtokens_sendtx addr3 cAddr (addr1,11)
             , test1_sendtokens_sendtx addr1 cAddr (addr4,11)
@@ -381,6 +396,7 @@ test_test1 doOk maddr = do
   etxrs4 <- fromRight <$> web3Wait watxrs1
   etxrs5 <- fromRight <$> web3Wait watxrs2
   logDebugN "========= Síncronas ========================================="
+  logDebugTxrs test1_decode_log etxrs0
   logDebugTxrs test1_decode_log etxrs1
   logDebugTxrs test1_decode_log etxrs2
   logDebugTxrs test1_decode_log etxrs3
@@ -420,7 +436,7 @@ test_test1 doOk maddr = do
 
 test_types_simple doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts
-  cAddr <- conAddr types_guard (Just types_decode_log) (types_new_sendtx addr2) maddr
+  cAddr <- conAddr types_guard Nothing (Just types_decode_log) (types_new_sendtx addr2) maddr
   eth_call (RpcEthMsgCall Nothing (Just cAddr) Nothing Nothing Nothing
             (Just $ types_func3_in (12345,True,23))) RPBLatest
     >>= myLog . T.pack . show . types_func3_out
@@ -428,10 +444,34 @@ test_types_simple doOk maddr = do
 
 test_types doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts
-  cAddr <- conAddr types_guard (Just types_decode_log) (types_new_sendtx addr2) maddr
+  cAddr <- conAddr types_guard (Just types_swarm_upload) (Just types_decode_log) (types_new_sendtx addr2) maddr
   bn <- eth_blockNumber
   fi <- web3FilterNew $ RpcEthFilter (Just $ RPBNum bn) (Just RPBLatest)
                                      (Just [cAddr]) Nothing
+  types_rettryuint8_call_pure cAddr 1 >>= logLabel "uint8 1"
+  types_rettryuint8_call_pure cAddr (-1) >>= logLabel "uint8 -1"
+  types_rettryuint8_call_pure cAddr 126 >>= logLabel "uint8 126"
+  types_rettryuint8_call_pure cAddr (-126) >>= logLabel "uint8 -126"
+  types_rettryuint8_call_pure cAddr 127 >>= logLabel "uint8 127"
+  types_rettryuint8_call_pure cAddr (-127) >>= logLabel "uint8 -127"
+  types_rettryuint8_call_pure cAddr 128 >>= logLabel "uint8 128"
+  types_rettryuint8_call_pure cAddr (-128) >>= logLabel "uint8 -128"
+  types_rettryuint8_call_pure cAddr 255 >>= logLabel "uint8 255"
+  types_rettryuint8_call_pure cAddr (-255) >>= logLabel "uint8 -255"
+  types_rettryuint8_call_pure cAddr 256 >>= logLabel "uint8 256"
+  types_rettryuint8_call_pure cAddr (-256) >>= logLabel "uint8 -256"
+  types_rettryint8_call_pure cAddr 1 >>= logLabel "int8 1"
+  types_rettryint8_call_pure cAddr (-1) >>= logLabel "int8 -1"
+  types_rettryint8_call_pure cAddr 126 >>= logLabel "int8 126"
+  types_rettryint8_call_pure cAddr (-126) >>= logLabel "int8 -126"
+  types_rettryint8_call_pure cAddr 127 >>= logLabel "int8 127"
+  types_rettryint8_call_pure cAddr (-127) >>= logLabel "int8 -127"
+  types_rettryint8_call_pure cAddr 128 >>= logLabel "int8 128"
+  types_rettryint8_call_pure cAddr (-128) >>= logLabel "int8 -128"
+  types_rettryint8_call_pure cAddr 255 >>= logLabel "int8 255"
+  types_rettryint8_call_pure cAddr (-255) >>= logLabel "int8 -255"
+  types_rettryint8_call_pure cAddr 256 >>= logLabel "int8 256"
+  types_rettryint8_call_pure cAddr (-256) >>= logLabel "int8 -256"
   types_retuint_call_pure cAddr 1234567890 >>= myLog . T.pack . show
   types_retaddress_call_pure cAddr addr4 >>= myLog . T.pack . show
   types_retbytes16_call_pure cAddr "0 1 2 3 4 5 6 7 " >>= myLog . T.pack . show
@@ -491,14 +531,16 @@ test_types doOk maddr = do
   logDebugTxrs types_decode_log etxrs1
   logDebugTxrs types_decode_log etxrs2
   web3FilterGetChanges fi >>= logDebugFilterLogs "types" types_decode_log
-  liftIO (threadDelay $ 45*10^6)
+  liftIO (threadDelay $ 5*10^6)
   showWeb3Session "Session: finalizando Types"
   when doOk $ web3FilterUninstall fi
   return cAddr
+  where
+    logLabel t = myLog . T.pack . ((t++": ")++) . show
 
 test_sharer doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts
-  cAddr <- conAddr sharer_guard (Just sharer_decode_log)
+  cAddr <- conAddr sharer_guard (Just sharer_swarm_upload) (Just sharer_decode_log)
                       (sharer_new_sendtx addr1) maddr
   logInfoN "Sharer: antes de transferir"
   showBalance addr1
@@ -527,17 +569,17 @@ test_sharer doOk maddr = do
 
 test_ownedtoken doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts
-  cAddr <- conAddr ownedtoken_guard null_decode_log
-                      (ownedtoken_new_sendtx addr4 "ownedtoken") maddr
+  cAddr <- conAddr ownedtoken_guard (Just ownedtoken_swarm_upload) null_decode_log
+                      (ownedtoken_new_sendtx addr1 "ownedtoken") maddr
   etxr1 <- web3_estimateAndSendTx'
-            (ownedtoken_changename_sendtx addr4 cAddr "ownedtoken2")
+            (ownedtoken_changename_sendtx addr1 cAddr "ownedtoken2")
   etxr2 <- web3_estimateAndSendTx'
             (ownedtoken_transfer_sendtx addr4 cAddr addr2)
   etxr3 <- web3_estimateAndSendTx'
             (ownedtoken_changename_sendtx addr2 cAddr "ownedtoken3")
   etxrs4 <- web3_estimateAndSendTxs
-              [ ownedtoken_transfer_sendtx addr2 cAddr addr3
-              , ownedtoken_transfer_sendtx addr4 cAddr addr2
+              [ ownedtoken_transfer_sendtx addr1 cAddr addr3
+              , ownedtoken_transfer_sendtx addr1 cAddr addr2
               ]
   mapM_ (logDebugN . T.pack . show) (etxr1:etxr2:etxr3:etxrs4)
   showWeb3Session "Session: finalizando OwnedToken"
