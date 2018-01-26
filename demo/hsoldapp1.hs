@@ -121,26 +121,31 @@ showBalance addr = eth_getBalance addr RPBLatest
                >>= myLog . ((getHexAddr addr <> " balance: ")<>)
                          . T.pack . show
 
+-- 
+-- Muestra los eventos emitidos por UN contract
+--
 logDebugTxrs :: (JsonRpcConn c, MonadLoggerIO m, MonadBaseControl IO m, Show e)
              => (RpcEthLog -> Either Text e)
              -> [Either Text RpcEthTxReceipt]
              -> Web3T c m ()
-logDebugTxrs dl etxrs = mapM_ (\etxr -> do
+logDebugTxrs func_decode_log etxrs = mapM_ (\etxr -> do
   logDebugN $ T.pack $ show etxr
   case etxr of
     Left e -> return ()
-    Right txr -> mapM_ (myLog . T.pack . show . dl) (txrLogs txr) ) etxrs
+    Right txr -> mapM_ (myLog . T.pack . show . func_decode_log)
+                       (txrLogs txr)
+  ) etxrs
 
 logDebugFilterLogs :: (JsonRpcConn c, MonadLoggerIO m, MonadBaseControl IO m, Show e)
                    => Text
                    -> (RpcEthLog -> Either Text e)
                    -> [RpcFilterLog]
                    -> Web3T c m ()
-logDebugFilterLogs n dl fls =
+logDebugFilterLogs n func_decode_log fls =
   mapM_ (myLog . T.pack . (("FilterLogs " ++ show n ++ ": ")++)
                . (\rfl -> case rfl of
                     EthHashFilterLog h -> show h
-                    EthFilterLog fl -> show $ dl fl)) fls
+                    EthFilterLog fl -> show $ func_decode_log fl)) fls
 
 conAddr :: (JsonRpcConn c, MonadLoggerIO m, MonadBaseControl IO m, Show e)
         => (HexEthAddr -> Web3T c m ())
@@ -149,24 +154,44 @@ conAddr :: (JsonRpcConn c, MonadLoggerIO m, MonadBaseControl IO m, Show e)
         -> (HexEthAddr, Maybe HexEthAddr, Maybe Integer, Maybe HexData)
         -> Maybe HexEthAddr
         -> Web3T c m HexEthAddr
-conAddr conG mConU mdl (f,mt,mv,md) maddr = case maddr of
-  Just addr -> conG addr >> return addr
-  Nothing -> do
-    txr <- web3_estimateAndSendTx f mt mv md >>= web3FromE
-    case mdl of
-      Nothing -> return ()
-      Just dl -> logDebugTxrs dl [Right txr]
-    case mConU of
-      Nothing -> return ()
-      Just conU -> (liftIO conU) >>= logDebugN . T.pack . show
-    return $ fromJust $ txrContractAddress txr
+conAddr func_guard m_func_upload m_func_decode_log (f,mt,mv,md) maddr =
+  case maddr of
+    -- Verificar el código asociado a la dirección dada
+    Just addr -> func_guard addr >> return addr
+    Nothing -> do
+      -- Crear contract
+      txr <- web3_estimateAndSendTx f mt mv md >>= web3FromE
+      case m_func_decode_log of
+        Nothing -> return ()
+        -- Decodificar logs emitidos por el constructor
+        Just func_decode_log -> logDebugTxrs func_decode_log [Right txr]
+      case m_func_upload of
+        Nothing -> return ()
+        -- Upload metadata y fuentes a swarm
+        Just func_upload -> (liftIO func_upload)
+                        >>= logDebugN . T.pack . show
+      return $ fromJust $ txrContractAddress txr
 
 newFilter :: (JsonRpcConn c, MonadLoggerIO m, MonadBaseControl IO m)
-          => HexEthAddr -> Int64 -> [RpcEthFilterTopic] -> Web3T c m FilterId
+          => HexEthAddr -> Int64 -> [RpcEthFilterTopic]
+          -> Web3T c m FilterId
 newFilter cAddr bn ftps = do
   logDebugN $ T.pack $ show ftps
   web3FilterNew $ RpcEthFilter (Just $ RPBNum bn) (Just RPBLatest)
                                (Just [cAddr]) (Just ftps)
+
+-- 
+-- La funcionalidad de los tests es:
+-- 
+--  + Obtener la dirección del contract
+--  + Crear event filters
+--  + Enviar transacciones, de forma asíncrona, para modificar
+--    el estado del contract
+--  + Hacer calls para consultar el estado del contract
+--  + Mostrar los logs emitidos
+--  + Desinstalar filters y esperar finalización de threads
+--
+
 
 test_new1 doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts
@@ -183,31 +208,35 @@ test_coin doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts
   cAddr <- conAddr coin_guard (Just coin_swarm_upload) (Just coin_decode_log) (coin_new_sendtx addr2) maddr
   bn <- eth_blockNumber
-  fi1 <- newFilter cAddr bn $ coin_to_filter_topics Coin_Sent_Filter
+  fi0 <- newFilter cAddr bn $ coin_to_filter_topics (Coin_Mint_Filter Nothing)
+  fi1 <- newFilter cAddr bn $ coin_to_filter_topics (Coin_Sent_Filter (Nothing, Nothing, Nothing))
+  fi2 <- newFilter cAddr bn $ coin_to_filter_topics (Coin_Sent_Filter (Just addr3, Nothing, Nothing))
+  fi3 <- newFilter cAddr bn $ coin_to_filter_topics (Coin_Sent_Filter (Nothing, Just addr4, Nothing))
+  fi4 <- newFilter cAddr bn $ coin_to_filter_topics (Coin_Sent_Filter (Nothing, Nothing, Just 500))
   etxrs1 <- web3_estimateAndSendTxs
-            [ coin_mint_sendtx addr2 cAddr (addr1, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr2, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr3, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr4, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr2, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr3, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr4, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr2, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr3, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr4, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr2, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr3, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr4, 50000000)
-            , coin_mint_sendtx addr1 cAddr (addr4, 50000000)
-            , coin_mint_sendtx addr1 cAddr (addr2, 50000000)
-            , coin_mint_sendtx addr1 cAddr (addr3, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr2, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr3, 50000000)
-            , coin_mint_sendtx addr2 cAddr (addr4, 50000000)
-            , coin_mint_sendtx addr1 cAddr (addr4, 50000000)
-            , coin_mint_sendtx addr1 cAddr (addr2, 50000000)
-            , coin_mint_sendtx addr1 cAddr (addr3, 50000000)
-            , coin_mint_sendtx addr1 cAddr (addr4, 50000000)
+            [ coin_mint_sendtx addr2 cAddr (addr1, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr2, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr3, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr4, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr2, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr3, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr4, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr2, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr3, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr4, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr2, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr3, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr4, 5000000)
+            , coin_mint_sendtx addr1 cAddr (addr4, 5000000)
+            , coin_mint_sendtx addr1 cAddr (addr2, 5000000)
+            , coin_mint_sendtx addr1 cAddr (addr3, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr2, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr3, 5000000)
+            , coin_mint_sendtx addr2 cAddr (addr4, 5000000)
+            , coin_mint_sendtx addr1 cAddr (addr4, 5000000)
+            , coin_mint_sendtx addr1 cAddr (addr2, 5000000)
+            , coin_mint_sendtx addr1 cAddr (addr3, 5000000)
+            , coin_mint_sendtx addr1 cAddr (addr4, 5000000)
             ]
   etxrs2 <- web3_estimateAndSendTxs
             [ coin_send_sendtx addr1 cAddr (addr3, 500)
@@ -225,9 +254,17 @@ test_coin doOk maddr = do
                       >>= myLog . ((getHexAddr addr <> ": ") <>)
                                 . T.pack . show . coin_balances_out)
         [addr1, addr2, addr3, addr4]
+  web3FilterGetChanges fi0 >>= logDebugFilterLogs "coin filter0" coin_decode_log
   web3FilterGetChanges fi1 >>= logDebugFilterLogs "coin filter1" coin_decode_log
+  web3FilterGetChanges fi2 >>= logDebugFilterLogs "coin filter2" coin_decode_log
+  web3FilterGetChanges fi3 >>= logDebugFilterLogs "coin filter3" coin_decode_log
+  web3FilterGetChanges fi4 >>= logDebugFilterLogs "coin filter4" coin_decode_log
   showWeb3Session "Session: finalizando Coin"
-  when doOk $ web3FilterUninstall fi1
+  web3FilterUninstall fi0
+  web3FilterUninstall fi1
+  when doOk $ web3FilterUninstall fi2
+  web3FilterUninstall fi3
+  when doOk $ web3FilterUninstall fi4
   return cAddr
 
 test_topics doOk maddr = do
