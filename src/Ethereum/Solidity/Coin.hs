@@ -22,4 +22,3 @@ $(runIO getCurrentDirectory >>= \wd -> compile (SolcSettings [] [])
     [ wd ++ "/src/Ethereum/Solidity/coin.sol"
     ])
 
-

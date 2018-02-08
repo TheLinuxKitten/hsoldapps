@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -34,6 +35,7 @@ import qualified Data.Text as T
 import Network.Web3
 import Network.Web3.Dapp.EthABI
 import Network.Web3.Dapp.EthABI.Types
+import Network.Web3.Dapp.FixArray
 import Network.Web3.Extra
 import Network.Web3.Types
 import System.Environment (getArgs, getEnv)
@@ -513,12 +515,12 @@ test_types doOk maddr = do
   types_retaddress_call_pure cAddr addr4 >>= myLog . T.pack . show
   types_retbytes16_call_pure cAddr "0 1 2 3 4 5 6 7 " >>= myLog . T.pack . show
   types_retbytes32_call_pure cAddr "bytes32" >>= myLog . T.pack . show
-  types_retfixarruint_call_pure cAddr [1234567890,987654321]
+  types_retfixarruint_call_pure cAddr (NilL|>1234567890|>987654321)
     >>= myLog . T.pack . show
-  types_retfixarraddress_call_pure cAddr [addr3,addr4] >>= myLog . T.pack . show
-  types_retfixarrbytes16_call_pure cAddr ["fixarrbytes16","fixarrbytes16"]
+  types_retfixarraddress_call_pure cAddr (NilL|>addr3|>addr4) >>= myLog . T.pack . show
+  types_retfixarrbytes16_call_pure cAddr (NilL|>"fixarrbytes16"|>"fixarrbytes16")
     >>= myLog . T.pack . show
-  types_retfixarrbytes32_call_pure cAddr ["fixarrbytes32","fixarrbytes32"]
+  types_retfixarrbytes32_call_pure cAddr (NilL|>"fixarrbytes32"|>"fixarrbytes32")
     >>= myLog . T.pack . show
   types_retarruint_call_pure cAddr [9,8,7,6,5,4,3,2,1,0] >>= myLog . T.pack . show
   types_retarraddress_call_pure cAddr [addr1,addr2,addr3,addr4]
@@ -531,7 +533,7 @@ test_types doOk maddr = do
   types_retstring_call_pure cAddr "string" >>= myLog . T.pack . show
   mapM_ (\addr -> types_valores_call addr1 cAddr addr >>= myLog . T.pack . show) [addr1, addr2, addr3, addr4]
   types_func3_call addr1 cAddr (123456,True,127) >>= myLog . T.pack . show
-  types_func4_call_pure cAddr (0xabcdefabcdef, [True,False,True], -123456789, "Play Ethereum", addr3, "bytestring hola", False, ["uno","dos","tres","cuatro"]) >>= myLog . T.pack . show
+  types_func4_call_pure cAddr (0xabcdefabcdef, (NilL|>True|>False|>True), -123456789, "Play Ethereum", addr3, "bytestring hola", False, ["uno","dos","tres","cuatro"]) >>= myLog . T.pack . show
   types_func5_call_pure cAddr (127,255) >>= myLog . T.pack . show
   types_func5_call_pure cAddr (-127,255) >>= myLog . T.pack . show
   types_func5_call_pure cAddr (-1,255) >>= myLog . T.pack . show
@@ -546,19 +548,19 @@ test_types doOk maddr = do
             ]
   etxrs2 <- web3_estimateAndSendTxs
             [ types_retevents_sendtx addr1 cAddr
-            , types_reteventfixarruint_sendtx addr1 cAddr [12,34,56,78]
-            , types_reteventfixarrbytes16_sendtx addr1 cAddr ["bytes16", "bytes16", "bytes16", "bytes16"]
-            , types_reteventfixarrbytes32_sendtx addr1 cAddr ["bytes32", "bytes32", "bytes32", "bytes32"]
-            , types_reteventfixarraddress_sendtx addr1 cAddr [addr1, addr2, addr3, addr4]
+            , types_reteventfixarruint_sendtx addr1 cAddr (NilL|>12|>34|>56|>78)
+            , types_reteventfixarrbytes16_sendtx addr1 cAddr (NilL|>"bytes16"|>"bytes16"|>"bytes16"|>"bytes16")
+            , types_reteventfixarrbytes32_sendtx addr1 cAddr (NilL|>"bytes32"|>"bytes32"|>"bytes32"|>"bytes32")
+            , types_reteventfixarraddress_sendtx addr1 cAddr (NilL|>addr1|>addr2|>addr3|>addr4)
             , types_reteventarruint_sendtx addr1 cAddr [9912,9934,9956,9978]
             , types_reteventarrbytes16_sendtx addr1 cAddr ["dynbytes16", "dynbytes16", "dynbytes16", "dynbytes16"]
             , types_reteventarrbytes32_sendtx addr1 cAddr ["dynbytes32", "dynbytes32", "dynbytes32", "dynbytes32"]
             , types_reteventarraddress_sendtx addr1 cAddr [addr1, addr2, addr3, addr4, addr3, addr2, addr1]
             , types_retevents2_sendtx addr1 cAddr
-            , types_reteventfixarruint2_sendtx addr1 cAddr ([12,34,56,78],[87,65,43,21])
-            , types_reteventfixarrbytes162_sendtx addr1 cAddr (["bytes16", "bytes16", "bytes16", "bytes16"],["bytes16", "bytes16", "bytes16", "bytes16"])
-            , types_reteventfixarrbytes322_sendtx addr1 cAddr (["bytes32", "bytes32", "bytes32", "bytes32"],["bytes32", "bytes32", "bytes32", "bytes32"])
-            , types_reteventfixarraddress2_sendtx addr1 cAddr ([addr1, addr2, addr3, addr4],[addr1, addr2, addr3, addr4])
+            , types_reteventfixarruint2_sendtx addr1 cAddr (NilL|>12|>34|>56|>78,NilL|>87|>65|>43|>21)
+            , types_reteventfixarrbytes162_sendtx addr1 cAddr (NilL|>"bytes16"|>"bytes16"|>"bytes16"|>"bytes16",NilL|>"bytes16"|>"bytes16"|>"bytes16"|>"bytes16")
+            , types_reteventfixarrbytes322_sendtx addr1 cAddr (NilL|>"bytes32"|>"bytes32"|>"bytes32"|>"bytes32",NilL|>"bytes32"|>"bytes32"|>"bytes32"|>"bytes32")
+            , types_reteventfixarraddress2_sendtx addr1 cAddr (NilL|>addr1|>addr2|>addr3|>addr4,NilL|>addr1|>addr2|>addr3|>addr4)
             , types_reteventarruint2_sendtx addr1 cAddr ([9912,9934,9956,9978],[9912,9934,9956,9978])
             , types_reteventarrbytes162_sendtx addr1 cAddr (["dynbytes16", "dynbytes16", "dynbytes16", "dynbytes16"],["dynbytes16", "dynbytes16", "dynbytes16", "dynbytes16"])
             , types_reteventarrbytes322_sendtx addr1 cAddr (["dynbytes32", "dynbytes32", "dynbytes32", "dynbytes32"],["dynbytes32", "dynbytes32", "dynbytes32", "dynbytes32"])
@@ -606,8 +608,7 @@ test_sharer doOk maddr = do
 
 test_ownedtoken doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts
-  cAddr <- conAddr ownedtoken_guard (Just ownedtoken_swarm_upload) null_decode_log
-                      (ownedtoken_new_sendtx addr1 "ownedtoken") maddr
+  cAddr <- conAddr ownedtoken_guard (Just ownedtoken_swarm_upload) null_decode_log (ownedtoken_new_sendtx addr1 "ownedtoken") maddr
   etxr1 <- web3_estimateAndSendTx'
             (ownedtoken_changename_sendtx addr1 cAddr "ownedtoken2")
   etxr2 <- web3_estimateAndSendTx'

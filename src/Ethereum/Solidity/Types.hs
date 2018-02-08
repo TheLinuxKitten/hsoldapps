@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -21,5 +22,4 @@ import System.Directory (getCurrentDirectory)
 $(runIO getCurrentDirectory >>= \wd -> compile (SolcSettings [] [])
     [ wd ++ "/src/Ethereum/Solidity/types.sol"
     ])
-
 
