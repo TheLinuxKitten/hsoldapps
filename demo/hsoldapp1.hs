@@ -20,18 +20,21 @@ import Ethereum.Solidity.Sharer
 import Ethereum.Solidity.Test1
 import Ethereum.Solidity.Topics
 import Ethereum.Solidity.Types
+import Ethereum.Solidity.Typeops
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (unless, when)
 import Control.Monad.IO.Class
 import qualified Data.ByteString as BS
 import Data.Either (isLeft, isRight)
+import Data.Int
 import Data.List (nubBy)
 import Data.List.Split (splitOn)
 import Data.Maybe (fromJust, listToMaybe)
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Word
 import Network.Web3
 import Network.Web3.Dapp.EthABI
 import Network.Web3.Dapp.EthABI.Types
@@ -83,7 +86,8 @@ main = do
   print resp
   where
     ethAction threaded doOk caddrs = guardMining $ do
-      let tests = [ ("Coin", test_coin)
+      let tests = [ ("Typeops", test_typeops)
+                  , ("Coin", test_coin)
                   , ("Topics", test_topics)
                   , ("Test1", test_test1)
                   , ("Types", test_types)
@@ -576,6 +580,83 @@ test_types doOk maddr = do
   return cAddr
   where
     logLabel t = myLog . T.pack . ((t++": ")++) . show
+
+test_typeops doOk maddr = do
+  (addr1:addr2:addr3:addr4:accs) <- eth_accounts
+  cAddr <- conAddr typeops_guard (Just typeops_swarm_upload) null_decode_log (typeops_new_sendtx addr4) maddr
+  let intVals1 = 
+        [ (0,0), (-128,0), (0,-128), (-127,0), (0,-127)
+        , (-1,0), (0,-1), (1,0), (0,1), (127,0), (0,127)
+        , (128,0), (0,128), (255,0), (0,255), (256,0), (0,256)
+        , (-17,127), (-128,255), (-2,2)
+        ]
+  mapM_ (\a -> typeops_intops0_call_pure cAddr a >>= logArr "intops0" a) intVals1
+  mapM_ (\v -> typeops_intops1a_call_pure cAddr v >>= logArr "intops1a" v)
+        [ (100, 100, 100, 100), (20, 120, 7, 9)
+        , (127, 50, -130, -129), (-128, -50, -127, -128)
+        , (255, 256, 257, 258), (-258, -256, -255, -254)
+        , (-1, -20, 190, -1), (-128, 255, -130, 260)
+        , (-1, -1, -1, -1), (127, 127, 127, 127)
+        ]
+  mapM_ (\v@(a,b,c,d) -> myLog $ T.pack $ "         " ++ show v ++ " = " ++ show (a+b,a-b,c+d,c-d)) (
+        [ (100, 100, 100, 100), (20, 120, 7, 9)
+        , (127, 50, -130, -129), (-128, -50, -127, -128)
+        , (255, 256, 257, 258), (-258, -256, -255, -254)
+        , (-1, -20, 190, -1), (-128, 255, -130, 260)
+        , (-1, -1, -1, -1), (127, 127, 127, 127)
+        ] :: [(Int8,Int8,Word8,Word8)])
+  mapM_ (\v -> typeops_intops1b_call_pure cAddr v >>= logArr "intops1b" v)
+        [ (100, 100, 100, 100), (20, 120, 7, 9)
+        , (127, 50, -130, -129), (-128, -50, -127, -128)
+        , (255, 256, 257, 258), (-258, -256, -255, -254)
+        , (-1, -20, 190, -1), (-128, 255, -130, 260)
+        , (-1, -1, -1, -1), (127, 127, 127, 127)
+        ]
+  mapM_ (\v@(a,b,c,d) -> myLog $ T.pack $ "         " ++ show v ++ " = " ++ show (a+b+c+d,a-b+c-d)) (
+        [ (100, 100, 100, 100), (20, 120, 7, 9)
+        , (127, 50, -130, -129), (-128, -50, -127, -128)
+        , (255, 256, 257, 258), (-258, -256, -255, -254)
+        , (-1, -20, 190, -1), (-128, 255, -130, 260)
+        , (-1, -1, -1, -1), (127, 127, 127, 127)
+        ] :: [(Int8,Int8,Int8,Int8)])
+  mapM_ (\v -> typeops_intops1c_call_pure cAddr v >>= logArr "intops1c" v)
+        [ (100, 100, 100, 100), (20, 120, 7, 9)
+        , (127, 50, -130, -129), (-128, -50, -127, -128)
+        , (255, 256, 257, 258), (-258, -256, -255, -254)
+        , (-1, -20, 190, -1), (-128, 255, -130, 260)
+        , (-1, -1, -1, -1), (127, 127, 127, 127)
+        ]
+  mapM_ (\v@(a,b,c,d) -> myLog $ T.pack $ "         " ++ show v ++ " = " ++ show (a+b+c+d,a-b+c-d)) (
+        [ (100, 100, 100, 100), (20, 120, 7, 9)
+        , (127, 50, -130, -129), (-128, -50, -127, -128)
+        , (255, 256, 257, 258), (-258, -256, -255, -254)
+        , (-1, -20, 190, -1), (-128, 255, -130, 260)
+        , (-1, -1, -1, -1), (127, 127, 127, 127)
+        ] :: [(Word8,Word8,Word8,Word8)])
+  mapM_ (\a -> typeops_intops2_call_pure cAddr a >>= logArr "intops2" a) intVals1
+  mapM_ (\a -> typeops_intops3_call_pure cAddr a >>= logArr "intops3" a) intVals1
+  mapM_ (\a -> typeops_intops4_call_pure cAddr a >>= logArr "intops4" a) intVals1
+  mapM_ (\a -> typeops_intops5_call_pure cAddr a >>= logArr "intops5" a) intVals1
+  mapM_ (\a -> typeops_bytesops0_call_pure cAddr a >>= logArr "bytesops0" a)
+        [ ("\xabc\xdef", "\xabc\xdef")
+        , ("\xff\xff", "\xff\xff")
+        , ("", "\xff\xff")
+        , ("\xff\xff", "")
+        ]
+  mapM_ (\a -> typeops_bytesops1_call_pure cAddr a >>= logArr "bytesops1" a)
+        [ ("\xff\xff", "\xff\xff", 0xabcd)
+        , ("\x0\x1", "\x0\x10", 0xabcd)
+        ]
+  mapM_ (\a -> typeops_bytesops2_call_pure cAddr a >>= logArr "bytesops2" a)
+        [ (0xabcd, 0xab, 0xab)
+        , (0xabcd, 0xabcd, 0xabcd)
+        , (0xabcd, 0xff, 0xff)
+        , (0xabcd, -100, 0xfafa)
+        ]
+  showWeb3Session "Session: finalizando TypeOps"
+  return cAddr
+  where
+    logArr nf a r = myLog $ T.pack $ ((nf++" "++show a++" = ")++) $ show r
 
 test_sharer doOk maddr = do
   (addr1:addr2:addr3:addr4:accs) <- eth_accounts

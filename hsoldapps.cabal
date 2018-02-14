@@ -20,6 +20,7 @@ library
                      , Ethereum.Solidity.Test1
                      , Ethereum.Solidity.Topics
                      , Ethereum.Solidity.Types
+                     , Ethereum.Solidity.Typeops
   build-depends:       base >=4 && <5
                      , bytestring
                      , directory
