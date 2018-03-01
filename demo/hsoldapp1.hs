@@ -179,7 +179,7 @@ conAddr func_guard m_func_upload m_func_decode_log (f,mt,mv,md) maddr =
       return $ fromJust $ txrContractAddress txr
 
 newFilter :: (JsonRpcConn c, MonadLoggerIO m, MonadBaseControl IO m)
-          => HexEthAddr -> Int64 -> [RpcEthFilterTopic]
+          => HexEthAddr -> BlockNum -> [RpcEthFilterTopic]
           -> Web3T c m FilterId
 newFilter cAddr bn ftps = do
   logDebugN $ T.pack $ show ftps
