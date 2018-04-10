@@ -17,19 +17,20 @@ module Ethereum.Solidity.Meta where
 import Language.Haskell.TH
 import Network.Web3.Dapp.EthABI.TH
 import Network.Web3.Dapp.EthABI.Types
---import System.Directory (getCurrentDirectory)
+import System.Directory (getCurrentDirectory)
 
 -- Quitar comentario y usar una dirección conocida, sino produce error
 -- de compilación
-{--}
-$(downloadHttp "http://192.168.122.201:8543" defaultSwarmSettings
-      $ HexEthAddr "0x39df13a96f46db1e62b673086c692736d74baa1f")
-{--}
+{-
+$(downloadHttp "http://192.168.2.101:8545"
+      defaultSwarmSettings{ swarmBzzApiHost = "192.168.2.101"}
+      $ HexEthAddr "0x3c635e7d4a73a09db2317f0abca7243913908929")
+-}
 
 -- Comentar código al quitar los comentarios anteriores.
-{-
+{--}
 $(runIO getCurrentDirectory >>= \wd -> compile (SolcSettings [] [])
     [ wd ++ "/src/Ethereum/Solidity/coin.sol"
     ])
--}
+{--}
 
